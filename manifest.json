@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Ditto Cursor",
-  "version": "1.0.0",
-  "description": "A Ditto follows your cursor on every page, like a Pokemon HeartGold/SoulSilver follower.",
+  "name": "Pokemon Cursor",
+  "version": "1.1.0",
+  "description": "A Pokemon follows your cursor on every page. Pick from Ditto, Infernape, Lucario, Shiftree, or Mewtwo.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -10,7 +10,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Ditto Cursor",
+    "default_title": "Pokemon Cursor",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -28,7 +28,13 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["ditto.png"],
+      "resources": [
+        "ditto.png",
+        "infernape.png",
+        "lucario.png",
+        "shiftree.png",
+        "mewtwo.png"
+      ],
       "matches": ["<all_urls>"]
     }
   ]

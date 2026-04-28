@@ -1,65 +1,142 @@
-// Ditto Cursor - content script
-// Injects a sprite-based Ditto follower into every page. Walks toward the
+// Pokemon Cursor - content script
+// Injects a sprite-based pokemon follower into every page. Walks toward the
 // mouse at constant speed, faces the direction of travel, and bounces in
-// place while playing the walking-south animation when parked on the cursor.
+// place playing the walking-south animation when parked on the cursor.
 //
-// Ported from the Ditto cursor in athinshetty.com.
+// Switching pokemon via the popup swaps the sprite live without resetting
+// where the follower currently is on screen.
 
 (function () {
   "use strict";
 
-  // Skip if already injected (in case the script runs twice).
-  if (window.__dittoCursorInjected__) return;
-  window.__dittoCursorInjected__ = true;
+  if (window.__pokeCursorInjected__) return;
+  window.__pokeCursorInjected__ = true;
 
   // -----------------------------------------------------------------
-  // Sprite + animation config (Ditto, 4x4 sheet at 64x64 per frame).
+  // Pokemon configs. Walk speed scales with in-game base Speed stat,
+  // anchored to Ditto (base 48 = 0.9 px/frame).
   // -----------------------------------------------------------------
-  const SPRITE_URL = chrome.runtime.getURL("ditto.png");
-  const FRAME_SIZE = 64;
-  const FRAMES_PER_ROW = 4;
-  const ROWS = 4;
+  const REFERENCE_BASE_SPEED = 48;
+  const REFERENCE_WALK_SPEED = 0.9;
+  function speedFor(baseSpeed) {
+    return Math.round((REFERENCE_WALK_SPEED * baseSpeed) / REFERENCE_BASE_SPEED * 100) / 100;
+  }
 
-  // Sprite-sheet row indices, verified visually for ditto.png.
+  // Sheets are normalized to 4 rows: 0=down, 1=left, 2=right, 3=up.
+  const POKEMON = [
+    {
+      id: "ditto",
+      name: "Ditto",
+      file: "ditto.png",
+      frameWidth: 64,
+      frameHeight: 64,
+      framesPerDirection: 4,
+      displayWidth: 64,
+      displayHeight: 64,
+      walkSpeed: speedFor(48),
+      frameInterval: 240,
+      bounceAmplitude: 8,
+      bouncePeriod: 420,
+    },
+    {
+      id: "infernape",
+      name: "Infernape",
+      file: "infernape.png",
+      frameWidth: 112,
+      frameHeight: 148,
+      framesPerDirection: 2,
+      displayWidth: 54,
+      displayHeight: 72,
+      walkSpeed: speedFor(108),
+      frameInterval: 220,
+      bounceAmplitude: 10,
+      bouncePeriod: 380,
+    },
+    {
+      id: "lucario",
+      name: "Lucario",
+      file: "lucario.png",
+      frameWidth: 99,
+      frameHeight: 129,
+      framesPerDirection: 2,
+      displayWidth: 54,
+      displayHeight: 70,
+      walkSpeed: speedFor(90),
+      frameInterval: 240,
+      bounceAmplitude: 9,
+      bouncePeriod: 400,
+    },
+    {
+      id: "shiftree",
+      name: "Shiftree",
+      file: "shiftree.png",
+      frameWidth: 140,
+      frameHeight: 114,
+      framesPerDirection: 2,
+      displayWidth: 60,
+      displayHeight: 48,
+      walkSpeed: speedFor(80),
+      frameInterval: 280,
+      bounceAmplitude: 8,
+      bouncePeriod: 420,
+    },
+    {
+      id: "mewtwo",
+      name: "Mewtwo",
+      file: "mewtwo.png",
+      frameWidth: 229,
+      frameHeight: 247,
+      framesPerDirection: 2,
+      displayWidth: 60,
+      displayHeight: 64,
+      walkSpeed: speedFor(130),
+      frameInterval: 220,
+      bounceAmplitude: 10,
+      bouncePeriod: 380,
+    },
+  ];
+
+  function findConfig(id) {
+    return POKEMON.find((p) => p.id === id) || POKEMON[0];
+  }
+
+  // -----------------------------------------------------------------
+  // Sprite-sheet rows.
+  // -----------------------------------------------------------------
   const ROW_DOWN = 0;
   const ROW_LEFT = 1;
   const ROW_RIGHT = 2;
   const ROW_UP = 3;
-
-  // Movement / animation tuning.
-  const WALK_SPEED_PX_PER_FRAME = 0.9;
-  const FRAME_INTERVAL_MS = 240;
+  const ROWS = 4;
   const ARRIVE_RADIUS = 4;
-  const BOUNCE_AMPLITUDE_PX = 8;
-  const BOUNCE_PERIOD_MS = 420;
-
-  // Aim point centers the sprite on the cursor.
-  const TRAIL_OFFSET_X = -FRAME_SIZE / 2;
-  const TRAIL_OFFSET_Y = -FRAME_SIZE / 2;
 
   // -----------------------------------------------------------------
-  // Storage-backed enable flag. Default: on.
+  // Storage keys + helpers.
   // -----------------------------------------------------------------
-  const STORAGE_KEY = "dittoCursorEnabled";
+  const KEY_ENABLED = "pokeCursorEnabled";
+  const KEY_ID = "pokeCursorId";
 
-  let enabled = true;
-  let teardown = null;
-
-  function readEnabledThen(cb) {
+  function readSettings(cb) {
     try {
-      chrome.storage.sync.get({ [STORAGE_KEY]: true }, (result) => {
-        cb(result[STORAGE_KEY] !== false);
-      });
+      chrome.storage.sync.get(
+        { [KEY_ENABLED]: true, [KEY_ID]: "ditto" },
+        (result) =>
+          cb({
+            enabled: result[KEY_ENABLED] !== false,
+            id: result[KEY_ID] || "ditto",
+          })
+      );
     } catch {
-      cb(true);
+      cb({ enabled: true, id: "ditto" });
     }
   }
 
-  function watchEnabled(cb) {
+  function watchSettings(onEnabled, onId) {
     try {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area !== "sync") return;
-        if (STORAGE_KEY in changes) cb(changes[STORAGE_KEY].newValue !== false);
+        if (KEY_ENABLED in changes) onEnabled(changes[KEY_ENABLED].newValue !== false);
+        if (KEY_ID in changes) onId(changes[KEY_ID].newValue || "ditto");
       });
     } catch {
       /* no-op */
@@ -67,33 +144,41 @@
   }
 
   // -----------------------------------------------------------------
-  // The follower itself.
+  // The follower. configRef holds the active pokemon; the rAF loop reads
+  // from it each tick so swapping pokemon doesn't reset the position.
   // -----------------------------------------------------------------
+  let teardown = null;
+  let configRef = findConfig("ditto");
+
+  function applyElementStyle(el, cfg) {
+    const url = chrome.runtime.getURL(cfg.file);
+    el.style.width = cfg.displayWidth + "px";
+    el.style.height = cfg.displayHeight + "px";
+    el.style.backgroundImage = "url(" + url + ")";
+    el.style.backgroundSize =
+      cfg.displayWidth * cfg.framesPerDirection + "px " +
+      cfg.displayHeight * ROWS + "px";
+  }
+
   function start() {
-    // Skip touch / no-cursor devices.
     if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) {
       return null;
     }
 
     const el = document.createElement("div");
     el.setAttribute("aria-hidden", "true");
-    el.setAttribute("data-ditto-cursor", "");
+    el.setAttribute("data-poke-cursor", "");
     Object.assign(el.style, {
       position: "fixed",
       left: "0",
       top: "0",
-      width: FRAME_SIZE + "px",
-      height: FRAME_SIZE + "px",
       pointerEvents: "none",
-      backgroundImage: `url(${SPRITE_URL})`,
       backgroundRepeat: "no-repeat",
-      backgroundSize: `${FRAME_SIZE * FRAMES_PER_ROW}px ${FRAME_SIZE * ROWS}px`,
       imageRendering: "pixelated",
       willChange: "transform",
       zIndex: "2147483647",
       opacity: "0",
       transition: "opacity 0.2s",
-      // Defensive resets in case the host page styles `div` aggressively.
       margin: "0",
       padding: "0",
       border: "0",
@@ -101,6 +186,7 @@
       filter: "none",
       mixBlendMode: "normal",
     });
+    applyElementStyle(el, configRef);
 
     let targetX = -200;
     let targetY = -200;
@@ -112,9 +198,14 @@
     let lastFrameTime = 0;
     let rafId = 0;
 
+    function aimAt(clientX, clientY) {
+      const cfg = configRef;
+      targetX = clientX - cfg.displayWidth / 2;
+      targetY = clientY - cfg.displayHeight / 2;
+    }
+
     function onMove(e) {
-      targetX = e.clientX + TRAIL_OFFSET_X;
-      targetY = e.clientY + TRAIL_OFFSET_Y;
+      aimAt(e.clientX, e.clientY);
       if (!visible) {
         currentX = targetX;
         currentY = targetY;
@@ -131,14 +222,15 @@
     }
 
     function tick(time) {
+      const cfg = configRef;
       const dx = targetX - currentX;
       const dy = targetY - currentY;
       const distance = Math.hypot(dx, dy);
       const moving = distance > ARRIVE_RADIUS;
 
       if (moving) {
-        const stepX = (dx / distance) * WALK_SPEED_PX_PER_FRAME;
-        const stepY = (dy / distance) * WALK_SPEED_PX_PER_FRAME;
+        const stepX = (dx / distance) * cfg.walkSpeed;
+        const stepY = (dy / distance) * cfg.walkSpeed;
         currentX += stepX;
         currentY += stepY;
 
@@ -148,26 +240,24 @@
           direction = stepY > 0 ? ROW_DOWN : ROW_UP;
         }
       } else {
-        // Walk-in-place south animation while parked on the cursor.
         direction = ROW_DOWN;
       }
 
-      // Cycle frames whether walking or bouncing in place.
-      if (time - lastFrameTime > FRAME_INTERVAL_MS) {
-        frameIdx = (frameIdx + 1) % FRAMES_PER_ROW;
+      if (time - lastFrameTime > cfg.frameInterval) {
+        frameIdx = (frameIdx + 1) % cfg.framesPerDirection;
         lastFrameTime = time;
       }
 
       let bounceY = 0;
       if (!moving) {
-        const phase = (time % BOUNCE_PERIOD_MS) / BOUNCE_PERIOD_MS;
-        bounceY = -Math.abs(Math.sin(phase * Math.PI)) * BOUNCE_AMPLITUDE_PX;
+        const phase = (time % cfg.bouncePeriod) / cfg.bouncePeriod;
+        bounceY = -Math.abs(Math.sin(phase * Math.PI)) * cfg.bounceAmplitude;
       }
 
-      const bgX = -frameIdx * FRAME_SIZE;
-      const bgY = -direction * FRAME_SIZE;
-      el.style.transform = `translate3d(${currentX}px, ${currentY + bounceY}px, 0)`;
-      el.style.backgroundPosition = `${bgX}px ${bgY}px`;
+      const bgX = -frameIdx * cfg.displayWidth;
+      const bgY = -direction * cfg.displayHeight;
+      el.style.transform = "translate3d(" + currentX + "px," + (currentY + bounceY) + "px,0)";
+      el.style.backgroundPosition = bgX + "px " + bgY + "px";
 
       rafId = requestAnimationFrame(tick);
     }
@@ -177,27 +267,47 @@
     window.addEventListener("mouseout", onMouseOut);
     rafId = requestAnimationFrame(tick);
 
-    return function cleanup() {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseout", onMouseOut);
-      cancelAnimationFrame(rafId);
-      if (el.parentNode) el.parentNode.removeChild(el);
+    return {
+      cleanup: function () {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseout", onMouseOut);
+        cancelAnimationFrame(rafId);
+        if (el.parentNode) el.parentNode.removeChild(el);
+      },
+      // Swap to a different pokemon without losing the on-screen position.
+      swap: function (newCfg) {
+        applyElementStyle(el, newCfg);
+        // Re-center on the current target with the new sprite size.
+        if (visible) {
+          // approximate by keeping currentX/currentY where they are;
+          // next mousemove naturally re-aims with the new offset
+        }
+        frameIdx = 0;
+        lastFrameTime = 0;
+      },
     };
   }
 
   // -----------------------------------------------------------------
-  // Lifecycle: start on load if enabled, react to toggle changes.
+  // Lifecycle.
   // -----------------------------------------------------------------
   function applyEnabled(next) {
-    enabled = next;
-    if (enabled && !teardown) {
+    if (next && !teardown) {
       teardown = start();
-    } else if (!enabled && teardown) {
-      teardown();
+    } else if (!next && teardown) {
+      teardown.cleanup();
       teardown = null;
     }
   }
 
-  readEnabledThen((initial) => applyEnabled(initial));
-  watchEnabled((next) => applyEnabled(next));
+  function applyId(newId) {
+    configRef = findConfig(newId);
+    if (teardown) teardown.swap(configRef);
+  }
+
+  readSettings(({ enabled, id }) => {
+    configRef = findConfig(id);
+    applyEnabled(enabled);
+  });
+  watchSettings(applyEnabled, applyId);
 })();

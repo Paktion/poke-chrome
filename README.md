@@ -23,6 +23,15 @@ Reload tabs you already had open after installing — content scripts only
 attach on page load. Toggling pokemon and on/off after that propagates
 live across open tabs.
 
+## Keyboard shortcut
+
+`Alt+Shift+P` (Windows/Linux) / `Option+Shift+P` (Mac) toggles the
+follower on/off. Chrome's `Alt`-Mac maps to `Option` automatically, so
+one entry covers both platforms.
+
+You can rebind it at `chrome://extensions/shortcuts`. The shortcut only
+fires while Chrome has focus.
+
 ## How it works
 
 - `manifest.json` registers a content script that runs on `<all_urls>` at

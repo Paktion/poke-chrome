@@ -18,6 +18,17 @@
     }
   },
   "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "toggle-cursor": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Toggle Pokemon Cursor on/off"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

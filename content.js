@@ -116,30 +116,19 @@
   const KEY_ENABLED = "pokeCursorEnabled";
   const KEY_ID = "pokeCursorId";
 
-  function readSettings(cb) {
+  function syncFromStorage() {
     try {
       chrome.storage.sync.get(
         { [KEY_ENABLED]: true, [KEY_ID]: "ditto" },
-        (result) =>
-          cb({
-            enabled: result[KEY_ENABLED] !== false,
-            id: result[KEY_ID] || "ditto",
-          })
+        (result) => {
+          applyState(
+            result[KEY_ENABLED] !== false,
+            result[KEY_ID] || "ditto"
+          );
+        }
       );
     } catch {
-      cb({ enabled: true, id: "ditto" });
-    }
-  }
-
-  function watchSettings(onEnabled, onId) {
-    try {
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area !== "sync") return;
-        if (KEY_ENABLED in changes) onEnabled(changes[KEY_ENABLED].newValue !== false);
-        if (KEY_ID in changes) onId(changes[KEY_ID].newValue || "ditto");
-      });
-    } catch {
-      /* no-op */
+      applyState(true, "ditto");
     }
   }
 
@@ -164,6 +153,8 @@
     if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) {
       return null;
     }
+
+    let stopped = false;
 
     const el = document.createElement("div");
     el.setAttribute("aria-hidden", "true");
@@ -222,6 +213,7 @@
     }
 
     function tick(time) {
+      if (stopped) return;
       const cfg = configRef;
       const dx = targetX - currentX;
       const dy = targetY - currentY;
@@ -269,9 +261,10 @@
 
     return {
       cleanup: function () {
+        stopped = true;
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseout", onMouseOut);
-        cancelAnimationFrame(rafId);
+        try { cancelAnimationFrame(rafId); } catch (_) {}
         if (el.parentNode) el.parentNode.removeChild(el);
       },
       // Swap to a different pokemon without losing the on-screen position.
@@ -291,23 +284,40 @@
   // -----------------------------------------------------------------
   // Lifecycle.
   // -----------------------------------------------------------------
-  function applyEnabled(next) {
-    if (next && !teardown) {
-      teardown = start();
-    } else if (!next && teardown) {
+  function applyState(enabled, id) {
+    const newCfg = findConfig(id);
+    const idChanged = newCfg !== configRef;
+    configRef = newCfg;
+
+    if (enabled) {
+      if (!teardown) {
+        teardown = start();
+      } else if (idChanged) {
+        teardown.swap(configRef);
+      }
+    } else if (teardown) {
       teardown.cleanup();
       teardown = null;
     }
   }
 
-  function applyId(newId) {
-    configRef = findConfig(newId);
-    if (teardown) teardown.swap(configRef);
-  }
+  // Remove any leftover follower elements from previous content-script
+  // versions (e.g. an older v1.0 ditto-cursor still in the DOM).
+  document
+    .querySelectorAll("[data-poke-cursor], [data-ditto-cursor]")
+    .forEach((el) => {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    });
 
-  readSettings(({ enabled, id }) => {
-    configRef = findConfig(id);
-    applyEnabled(enabled);
-  });
-  watchSettings(applyEnabled, applyId);
+  syncFromStorage();
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "sync") return;
+      if (KEY_ENABLED in changes || KEY_ID in changes) {
+        syncFromStorage();
+      }
+    });
+  } catch (_) {
+    /* no-op */
+  }
 })();

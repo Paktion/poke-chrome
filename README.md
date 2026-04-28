@@ -25,9 +25,10 @@ live across open tabs.
 
 ## Keyboard shortcut
 
-`Alt+Shift+P` (Windows/Linux) / `Option+Shift+P` (Mac) toggles the
-follower on/off. Chrome's `Alt`-Mac maps to `Option` automatically, so
-one entry covers both platforms.
+`Ctrl+Shift+0` (Windows/Linux) / `Cmd+Shift+0` (Mac) toggles the
+follower on/off. Chrome auto-maps `Ctrl→Cmd` on Mac, so one entry
+covers both platforms. Picked because `Ctrl+0` / `Cmd+0` is zoom
+reset but adding Shift isn't claimed by Chrome or macOS.
 
 You can rebind it at `chrome://extensions/shortcuts`. The shortcut only
 fires while Chrome has focus.

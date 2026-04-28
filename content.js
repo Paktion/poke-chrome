@@ -254,9 +254,17 @@
       rafId = requestAnimationFrame(tick);
     }
 
+    function onFullscreenChange() {
+      el.style.display = document.fullscreenElement ? "none" : "";
+    }
+
+    // Apply initial state in case the page is already fullscreen on load.
+    if (document.fullscreenElement) el.style.display = "none";
+
     document.documentElement.appendChild(el);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseout", onMouseOut);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
     rafId = requestAnimationFrame(tick);
 
     return {
@@ -264,6 +272,7 @@
         stopped = true;
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseout", onMouseOut);
+        document.removeEventListener("fullscreenchange", onFullscreenChange);
         try { cancelAnimationFrame(rafId); } catch (_) {}
         if (el.parentNode) el.parentNode.removeChild(el);
       },

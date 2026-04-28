@@ -1,0 +1,13 @@
+# Build artifacts
+*.zip
+dist/
+build/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
